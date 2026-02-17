@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from src.analisador import AnalisadorQuestoes
 from src.prompt_generator import GeradorPromptsQuestoes
 from src.questoes_saeb import listar_todas_questoes, obter_descritores_unicos
-# from src.file_parser import ParserArquivos, formatar_questoes_extraidas  # Desabilitado temporariamente
+from src.file_parser import ParserArquivos, formatar_questoes_extraidas
 
 # Configuração da página
 st.set_page_config(
@@ -142,7 +142,7 @@ def main():
         
         modo = st.radio(
             "Escolha o modo:",
-            ["📋 Analisar uma Questão", "📊 Analisar Múltiplas", " Consultar Questões", "ℹ️ Sobre Descritores"],
+            ["📋 Analisar uma Questão", "📊 Analisar Múltiplas", "📤 Upload de Arquivo", "🔍 Consultar Questões", "ℹ️ Sobre Descritores"],
             help="Selecione como deseja usar o corretor"
         )
         
@@ -348,7 +348,187 @@ def main():
                 prompt = gerador.gerar_prompt_multiplas_questoes(analise)
                 
                 copiar_para_clipboard(prompt, "📥 Baixar Relatório")
-    elif modo == "�🔍 Consultar Questões":
+    
+    elif modo == "📤 Upload de Arquivo":
+        st.header("Analisar Questões do Arquivo")
+        
+        st.info("""
+        📤 **Upload de Arquivo**
+        - Suporte para PDF, DOCX e Imagens (JPG, PNG)
+        - Sistema extrai questões automaticamente via OCR
+        - Você confirma e responde as questões
+        - Análise nos mesmos moldes do sistema
+        """)
+        
+        col1, col2 = st.columns([1, 1])
+        
+        with col1:
+            st.subheader("📁 Upload do Arquivo")
+            arquivo = st.file_uploader(
+                "Selecione um arquivo:",
+                type=["pdf", "docx", "jpg", "jpeg", "png", "bmp"],
+                label_visibility="collapsed"
+            )
+            
+            if arquivo:
+                st.markdown(f"**Arquivo selecionado:** {arquivo.name}")
+                
+                if st.button("🔍 Extrair Questões", use_container_width=True, type="primary"):
+                    st.session_state.arquivo_processado = True
+                    
+                    with st.spinner("🔄 Processando arquivo..."):
+                        parser = ParserArquivos()
+                        questoes_extraidas, mensagem = parser.processar_arquivo(
+                            arquivo.read(),
+                            arquivo.name
+                        )
+                    
+                    st.session_state.questoes_extraidas = formatar_questoes_extraidas(questoes_extraidas)
+                    st.session_state.mensagem_extracao = mensagem
+                    st.rerun()
+        
+        with col2:
+            st.subheader("📋 Informações")
+            st.write("""
+            **Formatos suportados:**
+            - 📄 PDF
+            - 📝 DOCX
+            - 🖼️ Imagens (JPG, PNG)
+            
+            **Como funciona:**
+            1. Suba seu arquivo com as questões
+            2. Sistema extrai automaticamente
+            3. Confirme as questões extraídas
+            4. Responda cada uma
+            5. Receba análise completa
+            """)
+        
+        # Mostrar resultado da extração
+        if hasattr(st.session_state, 'questoes_extraidas') and st.session_state.questoes_extraidas:
+            st.divider()
+            
+            # Mensagem de status
+            st.markdown(f"<div class='resultado-box'>{st.session_state.mensagem_extracao}</div>", unsafe_allow_html=True)
+            
+            questoes_arquivo = st.session_state.questoes_extraidas
+            
+            st.subheader(f"📋 {len(questoes_arquivo)} Questão(ões) Extraída(s)")
+            
+            # Permitir responder as questões
+            respostas = {}
+            
+            for i, q in enumerate(questoes_arquivo, 1):
+                with st.expander(f"Questão {i}", expanded=(i==1)):
+                    st.write(f"**Enunciado:**\n{q['enunciado']}")
+                    
+                    st.write("\n**Alternativas:**")
+                    alternativas_lista = []
+                    for letra in ['A', 'B', 'C', 'D']:
+                        if letra in q['alternativas']:
+                            texto = q['alternativas'][letra]
+                            st.write(f"**{letra})** {texto}")
+                            alternativas_lista.append(letra)
+                    
+                    # Input para resposta
+                    resposta = st.radio(
+                        "Sua resposta:",
+                        alternativas_lista,
+                        key=f"arquivo_resposta_{q['id']}"
+                    )
+                    
+                    respostas[q['id']] = resposta
+            
+            st.divider()
+            
+            if st.button("📊 Analisar Todas as Questões", use_container_width=True, type="primary"):
+                # Análise simulada já que questões são do arquivo
+                analise_resultados = []
+                
+                for questao in questoes_arquivo:
+                    q_id = questao['id']
+                    if q_id in respostas:
+                        resultado = {
+                            "questao_id": q_id,
+                            "enunciado": questao['enunciado'],
+                            "alternativas": questao['alternativas'],
+                            "resposta_aluno": respostas[q_id],
+                            "feedback": f"Você respondeu: {respostas[q_id]}",
+                            "tipo_texto": questao.get('tipo_texto', 'Extraído de arquivo')
+                        }
+                        analise_resultados.append(resultado)
+                
+                st.session_state.analise_arquivo = analise_resultados
+                st.rerun()
+            
+            # Mostrar análise se já foi feita
+            if hasattr(st.session_state, 'analise_arquivo'):
+                st.divider()
+                st.subheader("📊 Análise das Questões")
+                
+                for resultado in st.session_state.analise_arquivo:
+                    with st.expander(f"Questão {resultado['questao_id']}: Você respondeu {resultado['resposta_aluno']}"):
+                        st.write(f"**Enunciado:**\n{resultado['enunciado']}")
+                        st.write(f"\n**Sua resposta:** {resultado['resposta_aluno']}")
+                        st.info("Use a IA abaixo para verificar se sua resposta está correta.")
+                
+                # Gerar prompt para IA analisar
+                st.divider()
+                st.subheader("🤖 Gerar Relatório para IA")
+                
+                if st.button("📄 Gerar Análise Completa pela IA", use_container_width=True):
+                    # Criar prompt com questões do arquivo
+                    prompt = f"""# ANÁLISE DE QUESTÕES EXTRAÍDAS DE ARQUIVO
+
+## Resumo
+Total de questões: {len(st.session_state.analise_arquivo)}
+
+## Questões e Respostas do Aluno
+
+"""
+                    
+                    for res in st.session_state.analise_arquivo:
+                        prompt += f"""
+### Questão {res['questao_id']}
+**Enunciado:** {res['enunciado']}
+
+**Alternativas:**
+"""
+                        for letra, texto in res['alternativas'].items():
+                            prompt += f"{letra}) {texto}\n"
+                        
+                        prompt += f"\n**Resposta do aluno:** {res['resposta_aluno']}\n"
+                    
+                    prompt += """
+
+---
+
+## INSTRUÇÕES PARA ANÁLISE
+
+Você está analisando questões extraídas de um arquivo enviado por um educador.
+
+### IMPORTANTE:
+- Você NÃO conhece as gabaritos/respostas corretas
+- Mas pode avaliar a qualidade das questões e a lógica das respostas
+- Forneça feedback construtivo sobre cada resposta
+
+### PARA CADA QUESTÃO:
+1. Analise o enunciado e as alternativas
+2. Comente sobre a resposta escolhida pelo aluno
+3. Sugira possíveis erros comuns ou armadilhas
+4. Indique se a resposta parece logicamente fundamentada
+5. Proponha caminhos para verificar a resposta correta
+
+### ESTRUTURA DO RELATÓRIO:
+- Análise individual de cada questão
+- Padrões observados nas respostas
+- Sugestões gerais de estudo baseado nas respostas
+
+Gere agora uma análise educativa, construtiva e motivadora.
+"""
+                    
+                    copiar_para_clipboard(prompt, "📥 Baixar Análise")
+    
+    elif modo == "🔍 Consultar Questões":
         st.header("Banco de Questões SAEB")
         
         descritores = obter_descritores_unicos()
