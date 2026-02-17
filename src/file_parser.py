@@ -19,16 +19,13 @@ except ImportError:
     Document = None
 
 try:
-    import easyocr
-    READER = None  # Será carregado sob demanda
-except ImportError:
-    easyocr = None
-    READER = None
-
-try:
     from PIL import Image
 except ImportError:
     Image = None
+
+# easyocr será carregado sob demanda para evitar problemas em deploy
+easyocr = None
+READER = None
 
 
 class ParserArquivos:
@@ -36,6 +33,21 @@ class ParserArquivos:
     
     def __init__(self):
         self.leitor_ocr = None
+    
+    def _carregar_ocr(self):
+        """Carrega modelo OCR sob demanda"""
+        global READER, easyocr
+        
+        if READER is not None:
+            return READER
+        
+        try:
+            import easyocr as eocr
+            easyocr = eocr
+            READER = easyocr.Reader(['pt'], gpu=False)
+            return READER
+        except Exception as e:
+            raise RuntimeError(f"Erro ao carregar OCR: {str(e)}")
     
     def processar_arquivo(self, arquivo_bytes, nome_arquivo: str) -> Tuple[List[Dict], str]:
         """
@@ -104,24 +116,24 @@ class ParserArquivos:
     
     def _processar_imagem(self, arquivo_bytes, extensao) -> Tuple[List[Dict], str]:
         """Usa OCR para extrair texto de imagem"""
-        if easyocr is None:
-            return [], "❌ easyocr não está instalado. Execute: pip install easyocr"
         
         if Image is None:
             return [], "❌ Pillow não está instalado"
         
         try:
-            # Inicializar leitor OCR se não estiver pronto
-            if self.leitor_ocr is None:
-                import streamlit as st
-                with st.spinner("🔄 Inicializando OCR (primeira vez pode demorar)..."):
-                    self.leitor_ocr = easyocr.Reader(['pt'])
+            import streamlit as st
+            
+            # Carregar modelo OCR sob demanda
+            with st.spinner("🔄 Inicializando OCR (primeira vez pode demorar ~1-2 min)..."):
+                leitor_ocr = self._carregar_ocr()
             
             # Carregar imagem
             imagem = Image.open(io.BytesIO(arquivo_bytes))
             
             # Fazer OCR
-            resultado = self.leitor_ocr.readtext(imagem, detail=0)
+            with st.spinner("🔄 Processando imagem com OCR..."):
+                resultado = leitor_ocr.readtext(imagem, detail=0)
+            
             texto = "\n".join(resultado)
             
             questoes = self._extrair_questoes_do_texto(texto)
